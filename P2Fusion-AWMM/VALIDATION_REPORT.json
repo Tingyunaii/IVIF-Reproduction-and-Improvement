@@ -1,0 +1,49 @@
+{
+  "status": "passed_cpu_synthetic_checks",
+  "unit_and_integration_tests": 33,
+  "test_summary": "33 tests passed; manifest generation -> student training -> validation best checkpoint -> step2 resume -> adverse-only inference also passed",
+  "python": "3.12.14",
+  "pytorch": "2.5.1+cpu",
+  "python38_ast_compatibility": "passed for 8 new runtime modules",
+  "original_source_files_modified": [],
+  "source_archive_sha256": "f26e0e3f27d5fed8ffe93f6fa0c1fae5a70fca57834c67963e0200c950ddce52",
+  "real_awmm_images_available": false,
+  "real_teacher_weights_available": false,
+  "original_fusion_checkpoint_available": false,
+  "a40_cuda_tested": false,
+  "split_protocol": "Server-generated seed3407 90/10 clean-reference content groups; exact-test overlap excluded; not official scene-disjoint protocol",
+  "synthetic_smoke": {
+    "mode": "synthetic_smoke_only",
+    "device": "cpu",
+    "fused_shape": [
+      1,
+      1,
+      64,
+      64
+    ],
+    "losses": {
+      "intensity": 0.23746182024478912,
+      "ssim": 0.9889567494392395,
+      "gradient": 2.015084743499756,
+      "distill_ir": 0.7048130035400391,
+      "distill_vis": 0.05084293335676193,
+      "consistency": 0.012115348130464554,
+      "orthogonality": 0.008305568248033524,
+      "content_reconstruction": 0.24990539252758026,
+      "residual_reconstruction": 0.049944110214710236,
+      "self_supervision": 0.2998495101928711,
+      "total": 67.84397888183594
+    },
+    "gradient_norms": {
+      "fdn_ir": 1.0473359820669998,
+      "fdn_vis": 0.9501683855514899,
+      "dwam_ir": 0.09946665552762046,
+      "dwam_vis": 0.01867999452929937,
+      "clean_reconstructor_ir": 0.005926764570908261,
+      "residual_reconstructor_ir": 0.2628066868694082,
+      "clean_reconstructor_vis": 0.005424456934489711,
+      "residual_reconstructor_vis": 0.16114335641988137
+    },
+    "checkpoint_saved": false
+  }
+}
