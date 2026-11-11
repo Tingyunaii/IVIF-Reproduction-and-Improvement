@@ -1,7 +1,7 @@
 {
   "status": "passed_cpu_synthetic_checks",
-  "unit_and_integration_tests": 38,
-  "test_summary": "38 CPU tests passed, including original pipeline, color anchoring/chroma preservation, and grayscale/RGB inference saves. Synthetic test teachers only.",
+  "unit_and_integration_tests": 43,
+  "test_summary": "43 CPU tests passed. Includes original-Y loader and color restoration bit-exact audits against extracted uploaded-original source; full Y training/resume/inference; guarded and explicit RGB-to-Y fine-tuning.",
   "python": "3.12.14",
   "pytorch": "2.5.1+cpu",
   "python38_ast_compatibility": "passed for 8 new runtime modules",
@@ -53,5 +53,45 @@
     "retraining_required": false,
     "real_color_quality_tested": false,
     "training_anchor_respected": true
+  },
+  "original_y_audit": {
+    "loader_png_jpeg": "bit-exact against uploaded imread_uint(n_channels=3)",
+    "color_restore": "bit-exact against uploaded test.py block including uint8 conversion and resize",
+    "legacy_checkpoint_mode_guards": true,
+    "real_original_y_quality_tested": false
+  },
+  "original_y_synthetic_smoke": {
+    "mode": "synthetic_smoke_only",
+    "device": "cpu",
+    "fused_shape": [
+      1,
+      1,
+      64,
+      64
+    ],
+    "losses": {
+      "intensity": 0.23764313757419586,
+      "ssim": 0.9891608357429504,
+      "gradient": 2.0137083530426025,
+      "distill_ir": 0.6983481049537659,
+      "distill_vis": 0.050972361117601395,
+      "consistency": 0.011465978808701038,
+      "orthogonality": 0.007775300182402134,
+      "content_reconstruction": 0.2523941993713379,
+      "residual_reconstruction": 0.05017147213220596,
+      "self_supervision": 0.30256566405296326,
+      "total": 67.82247924804688
+    },
+    "gradient_norms": {
+      "fdn_ir": 1.1101194800043435,
+      "fdn_vis": 0.8562321020369591,
+      "dwam_ir": 0.10515294093728116,
+      "dwam_vis": 0.019177551452131594,
+      "clean_reconstructor_ir": 0.006286013425001813,
+      "residual_reconstructor_ir": 0.2696945633837731,
+      "clean_reconstructor_vis": 0.004485241403406031,
+      "residual_reconstructor_vis": 0.15763500784931672
+    },
+    "checkpoint_saved": false
   }
 }

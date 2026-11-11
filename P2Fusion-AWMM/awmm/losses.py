@@ -64,8 +64,10 @@ class AWMMLoss(nn.Module):
     resolution; training crops should be multiples of the network's 32-pixel
     stride/window product, as configured in the provided training script.
 
-    ``first_channel`` deliberately preserves the uploaded training code's
-    ``image[:, :1]`` reference convention. ``luminance`` is an explicit optional
+    ``first_channel`` uses ``image[:, :1]``. With dataset.input_mode=original_y
+    that channel is the original uint8 OpenCV Y, copied three times. In the
+    initial legacy RGB loader it was R, a preprocessing difference from the
+    uploaded original source. ``luminance`` is an explicit optional
     experiment, not an unannounced change to the baseline. The original SSIM
     formulas and weights are retained. ``ssim_data_range=1`` explicitly fixes
     the uploaded source's implicit library default of 255 on normalized images.

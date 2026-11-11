@@ -98,10 +98,12 @@ def atomic_save(payload, path):
 
 def resume_semantics(config):
     """Settings that must not change underneath a resumed best-val score/run."""
+    from awmm.preprocessing import input_mode
     train = config["train"]
     return {
         "network": config["network"], "loss": config["loss"], "teachers": config["teachers"],
         "crop_size": config["dataset"].get("crop_size", 256),
+        "input_mode": input_mode(config),
         "train": {key: train.get(key) for key in (
             "batch_size", "lr", "base_lr_multiplier", "freeze_encoder_steps",
             "milestones", "gamma", "amp", "seed", "weight_decay", "grad_clip",
@@ -222,6 +224,10 @@ def synthetic_smoke(config, device):
     criterion = AWMMLoss(device=device, **loss_options)
     clean_ir = torch.rand(1, 3, 64, 64, device=device)
     clean_vis = torch.rand(1, 3, 64, 64, device=device)
+    from awmm.preprocessing import input_mode
+    if input_mode(config) == "original_y":
+        clean_ir = clean_ir[:, :1].repeat(1, 3, 1, 1)
+        clean_vis = clean_vis[:, :1].repeat(1, 3, 1, 1)
     batch = {"clean_ir": clean_ir, "clean_vis": clean_vis,
              "ir": (clean_ir * 0.8 + 0.1).clamp(0, 1),
              "vis": (clean_vis * 0.7 + 0.2).clamp(0, 1)}
@@ -257,6 +263,8 @@ def parse_args(argv=None):
     parser.add_argument("--max-steps", type=int, default=0, help="Absolute optimizer step limit; 0 uses epochs")
     parser.add_argument("--val-batches", type=int, default=0, help="0 validates the complete validation manifest")
     parser.add_argument("--smoke-test", action="store_true", help="Synthetic wiring test; no data/teachers/checkpoints")
+    parser.add_argument("--allow-input-mode-transfer", action="store_true",
+                        help="Explicitly initialize a new fine-tuning stage from a different input convention")
     args = parser.parse_args(argv)
     if args.max_steps < 0 or args.val_batches < 0:
         parser.error("--max-steps and --val-batches must be nonnegative")
@@ -270,8 +278,12 @@ def main(argv=None):
     from awmm.data import AWMMFourImageDataset
     from awmm.losses import AWMMLoss
     from awmm.runtime import load_config, make_model, manifest_digest, seed_everything, build_teachers
+    from awmm.preprocessing import input_mode
 
     config = copy.deepcopy(load_config(args.config))
+    mode = input_mode(config)
+    if mode == "original_y" and config["loss"].get("fusion_reference", "first_channel") != "first_channel":
+        raise ValueError("original_y uses the first of three identical Y channels as fusion reference")
     for argument, section, key in ((args.data_root, "dataset", "root"),
                                     (args.manifest_dir, "dataset", "manifest_dir")):
         if argument:
@@ -298,9 +310,9 @@ def main(argv=None):
     audit_split_manifests(train_manifest, val_manifest)
     digest = manifest_digest([train_manifest, val_manifest])
     train_dataset = AWMMFourImageDataset(config["dataset"]["root"], train_manifest,
-                                        crop_size=crop_size, training=True)
+                                        crop_size=crop_size, training=True, input_mode=mode)
     val_dataset = AWMMFourImageDataset(config["dataset"]["root"], val_manifest,
-                                      crop_size=crop_size, training=False)
+                                      crop_size=crop_size, training=False, input_mode=mode)
     batch_size = int(train_options.get("batch_size", 2))
     workers = int(train_options.get("num_workers", 4))
     if batch_size < 1 or workers < 0:
@@ -319,6 +331,15 @@ def main(argv=None):
     if not args.resume and not initial and not args.from_scratch:
         raise ValueError("Provide --init /path/to/source.pth or explicitly use --from-scratch")
     if initial:
+        initial_payload = torch.load(initial, map_location="cpu", weights_only=False)
+        previous_mode = None
+        if isinstance(initial_payload, dict) and isinstance(initial_payload.get("config"), dict):
+            previous_mode = input_mode(initial_payload["config"])
+            if previous_mode != mode and not args.allow_input_mode_transfer:
+                raise ValueError("Input convention differs from initialization checkpoint. For a new explicit "
+                                 "fine-tuning experiment pass --allow-input-mode-transfer; do not use --resume.")
+        config["initialization"] = {"path": str(initial), "previous_input_mode": previous_mode,
+                                    "input_mode_transfer": previous_mode is not None and previous_mode != mode}
         print("Source checkpoint load report:", model.load_initial_checkpoint(initial), flush=True)
     optimizer = torch.optim.AdamW(
         optimizer_groups(model, float(train_options.get("lr", 1e-4)),
@@ -349,6 +370,7 @@ def main(argv=None):
     (run_dir / "config_resolved.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     log_path = run_dir / "metrics.jsonl"
     append_log(log_path, {"event": "start", "device": str(device), "torch": torch.__version__,
+                          "input_mode": mode,
                           "cuda_runtime": torch.version.cuda, "amp": amp_enabled,
                           "train_samples": len(train_dataset), "val_samples": len(val_dataset),
                           "validation": "deterministic_center_crop", "val_batch_limit": args.val_batches,

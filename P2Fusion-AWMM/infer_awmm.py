@@ -8,6 +8,7 @@ from PIL import Image
 import torch
 
 from awmm.runtime import load_config, make_model, load_awmm_checkpoint
+from awmm.preprocessing import input_mode, read_model_image, original_color_restore
 
 
 def image_index(folder):
@@ -20,9 +21,8 @@ def image_index(folder):
     return result
 
 
-def image_tensor(path):
-    with Image.open(path) as image:
-        array = np.array(image.convert("RGB"), dtype=np.float32) / 255.0
+def image_tensor(path, mode="rgb"):
+    array = read_model_image(path, mode).astype(np.float32) / 255.0
     return torch.from_numpy(array.transpose(2, 0, 1).copy()).unsqueeze(0)
 
 
@@ -55,14 +55,24 @@ def main():
     parser.add_argument("--ir-dir", required=True)
     parser.add_argument("--vis-dir", required=True)
     parser.add_argument("--output", required=True)
-    parser.add_argument("--color-source", choices=("none", "input", "reconstructed"), default="none",
-                        help="Optional color postprocess: observed VIS or learned clean VIS reconstruction")
+    parser.add_argument("--color-source", choices=("none", "input", "reconstructed", "original"), default=None,
+                        help="original_y defaults to original OpenCV Y+observed Cr/Cb; RGB mode keeps legacy options")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     config = load_config(args.config) if args.config else checkpoint.get("config")
     if not config:
         raise ValueError("Checkpoint has no architecture config; supply --config")
+    mode = input_mode(config)
+    if checkpoint.get("config") and input_mode(checkpoint["config"]) != mode:
+        raise ValueError("Input mode override differs from checkpoint training metadata")
+    if args.color_source is None:
+        args.color_source = "original" if mode == "original_y" else "none"
+    if args.color_source == "original" and mode != "original_y":
+        raise ValueError("Original Y/Cr/Cb restoration requires an original_y-trained checkpoint; "
+                         "legacy RGB/R checkpoints need a separate Y fine-tuning/training stage")
+    if mode == "original_y" and args.color_source not in ("none", "original"):
+        raise ValueError("original_y supports only original observed Cr/Cb or grayscale Y output")
     device = torch.device(args.device)
     model = make_model(config["network"]).to(device)
     load_awmm_checkpoint(model, args.checkpoint)
@@ -74,12 +84,15 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     with torch.no_grad():
         for stem in sorted(ir_paths):
-            ir, vis = image_tensor(ir_paths[stem]), image_tensor(vis_paths[stem])
+            ir, vis = image_tensor(ir_paths[stem], mode), image_tensor(vis_paths[stem], mode)
             if ir.shape != vis.shape:
                 raise ValueError("Mismatched image dimensions: {}".format(stem))
             ir, vis = ir.to(device), vis.to(device)
             outputs = model(ir, vis, return_aux=args.color_source == "reconstructed")
             result = outputs["fused"]
+            if args.color_source == "original":
+                Image.fromarray(original_color_restore(result, vis_paths[stem])).save(output / (stem + ".png"))
+                continue
             if args.color_source == "none":
                 array = result[0, 0].float().clamp(0, 1).cpu().numpy()
             else:
@@ -92,6 +105,7 @@ def main():
             Image.fromarray(image).save(output / (stem + ".png"))
     print(json.dumps({"images": len(ir_paths), "output": str(output),
                       "format": "grayscale fusion" if args.color_source == "none" else "RGB color postprocess",
+                      "input_mode": mode,
                       "color_source": args.color_source}))
 
 

@@ -1,5 +1,7 @@
 # P²Fusion → AWMM：配对干净参考引导的天气适应
 
+> **亮度与色彩对齐修正：** 初版 AWMM 数据读取为 RGB，第一通道损失实际监督 R，未对齐上传原版的复制 Y 输入；灰度保存也遗漏了原版 Y+Cr/Cb 还原。严格对齐版本及已有权重迁移说明见 [README_ORIGINAL_Y.md](README_ORIGINAL_Y.md)。本文件下述旧 RGB 配置保留用于复现先前实验，不能把它的权重仅改配置后称为 Y 训练模型。
+
 此版本在上传的 P²Fusion 源码上新增 AWMM 训练入口，原 `train.py`、`test.py`、`models/P2Fusion.py` 与原配置保留不动。请使用 **`train_awmm.py` / `infer_awmm.py`** 运行新模型。没有随包提供数据集或权重。
 
 ## 1. 放到服务器

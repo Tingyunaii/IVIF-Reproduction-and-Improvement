@@ -265,7 +265,7 @@ class AWMMFourImageDataset:
     A fixed-size validation center crop is deterministic. crop_size=None loads
     whole images (use batch_size=1 when image dimensions differ).
     """
-    def __init__(self, root, manifest, crop_size=256, training=True):
+    def __init__(self, root, manifest, crop_size=256, training=True, input_mode="rgb"):
         self.root = Path(root).expanduser().resolve()
         if isinstance(manifest, (str, Path)):
             manifest = json.loads(Path(manifest).read_text(encoding="utf-8"))
@@ -276,6 +276,10 @@ class AWMMFourImageDataset:
         self.records = manifest["records"]
         self.crop_size = crop_size
         self.training = bool(training)
+        from awmm.preprocessing import INPUT_MODES
+        if input_mode not in INPUT_MODES:
+            raise ValueError("Unknown input_mode: " + str(input_mode))
+        self.input_mode = input_mode
         if crop_size is not None and (not isinstance(crop_size, int) or crop_size < 1):
             raise ValueError("crop_size must be a positive integer or None")
         if not self.records:
@@ -294,9 +298,9 @@ class AWMMFourImageDataset:
 
         row = self.records[index]
         images = {}
+        from awmm.preprocessing import read_model_image
         for key in IMAGE_KEYS:
-            with Image.open(_safe_image_path(self.root, row[key])) as image:
-                images[key] = np.array(image.convert("RGB"), dtype=np.uint8)
+            images[key] = read_model_image(_safe_image_path(self.root, row[key]), self.input_mode)
         shapes = {key: image.shape for key, image in images.items()}
         if len(set(shapes.values())) != 1:
             raise ValueError("Four-image dimensions differ for {}: {}".format(row["id"], shapes))

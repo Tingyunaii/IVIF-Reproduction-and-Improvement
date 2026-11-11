@@ -89,7 +89,8 @@ class CleanReferenceTeachers(nn.Module):
 
     @torch.no_grad()
     def forward(self, clean_ir, clean_vis):
-        # Match the supplied source: RGB [0,1], no extra ImageNet normalization.
+        # Inputs follow dataset.input_mode: original_y is uint8 OpenCV Y
+        # repeated across channels; legacy rgb is actual RGB. No extra normalization.
         # Run outside mixed precision for saliency probabilities and BRISQUE.
         self.eval()
         with torch.autocast(device_type=clean_ir.device.type, enabled=False):
