@@ -26,6 +26,28 @@ def image_tensor(path):
     return torch.from_numpy(array.transpose(2, 0, 1).copy()).unsqueeze(0)
 
 
+def restore_color(fused, color_reference, reference_mode):
+    """Postprocess color; this is not a jointly trained RGB fusion decoder.
+
+    Adding an achromatic offset preserves reference chroma before clipping.
+    Anchor the offset to the actual training convention: first RGB channel
+    (legacy default) or luminance. Never silently interpret red as Y.
+    """
+    if (fused.ndim != 4 or fused.shape[1] != 1 or color_reference.ndim != 4
+            or color_reference.shape[1] != 3
+            or fused.shape[0] != color_reference.shape[0]
+            or fused.shape[-2:] != color_reference.shape[-2:]):
+        raise ValueError("Expected aligned B1HW fusion and B3HW color reference")
+    if reference_mode == "first_channel":
+        anchor = color_reference[:, :1]
+    elif reference_mode == "luminance":
+        coefficients = color_reference.new_tensor([0.299, 0.587, 0.114]).view(1, 3, 1, 1)
+        anchor = (color_reference * coefficients).sum(1, keepdim=True)
+    else:
+        raise ValueError("Unknown fusion_reference: " + str(reference_mode))
+    return (color_reference.float() + fused.float() - anchor.float()).clamp(0, 1)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", required=True)
@@ -33,6 +55,8 @@ def main():
     parser.add_argument("--ir-dir", required=True)
     parser.add_argument("--vis-dir", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--color-source", choices=("none", "input", "reconstructed"), default="none",
+                        help="Optional color postprocess: observed VIS or learned clean VIS reconstruction")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = parser.parse_args()
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
@@ -53,10 +77,22 @@ def main():
             ir, vis = image_tensor(ir_paths[stem]), image_tensor(vis_paths[stem])
             if ir.shape != vis.shape:
                 raise ValueError("Mismatched image dimensions: {}".format(stem))
-            result = model(ir.to(device), vis.to(device), return_aux=False)["fused"]
-            image = (result[0, 0].float().clamp(0, 1).cpu().numpy() * 255).round().astype(np.uint8)
+            ir, vis = ir.to(device), vis.to(device)
+            outputs = model(ir, vis, return_aux=args.color_source == "reconstructed")
+            result = outputs["fused"]
+            if args.color_source == "none":
+                array = result[0, 0].float().clamp(0, 1).cpu().numpy()
+            else:
+                reference = (vis if args.color_source == "input"
+                             else outputs["aux"]["vis"]["clean_recon"])
+                convention = config.get("loss", {}).get("fusion_reference", "first_channel")
+                rgb = restore_color(result, reference, convention)
+                array = rgb[0].permute(1, 2, 0).cpu().numpy()
+            image = (array * 255).round().astype(np.uint8)
             Image.fromarray(image).save(output / (stem + ".png"))
-    print(json.dumps({"images": len(ir_paths), "output": str(output), "format": "grayscale fusion"}))
+    print(json.dumps({"images": len(ir_paths), "output": str(output),
+                      "format": "grayscale fusion" if args.color_source == "none" else "RGB color postprocess",
+                      "color_source": args.color_source}))
 
 
 if __name__ == "__main__":

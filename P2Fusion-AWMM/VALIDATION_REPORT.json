@@ -1,7 +1,7 @@
 {
   "status": "passed_cpu_synthetic_checks",
-  "unit_and_integration_tests": 33,
-  "test_summary": "33 tests passed; manifest generation -> student training -> validation best checkpoint -> step2 resume -> adverse-only inference also passed",
+  "unit_and_integration_tests": 38,
+  "test_summary": "38 CPU tests passed, including original pipeline, color anchoring/chroma preservation, and grayscale/RGB inference saves. Synthetic test teachers only.",
   "python": "3.12.14",
   "pytorch": "2.5.1+cpu",
   "python38_ast_compatibility": "passed for 8 new runtime modules",
@@ -45,5 +45,13 @@
       "residual_reconstructor_vis": 0.16114335641988137
     },
     "checkpoint_saved": false
+  },
+  "color_postprocess": {
+    "input_chroma": true,
+    "reconstructed_chroma": true,
+    "default": "none",
+    "retraining_required": false,
+    "real_color_quality_tested": false,
+    "training_anchor_respected": true
   }
 }

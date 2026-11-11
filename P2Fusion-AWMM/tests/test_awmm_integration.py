@@ -75,6 +75,15 @@ class EndToEndTests(unittest.TestCase):
             with Image.open(base / "output/0.png") as image:
                 self.assertEqual(image.size, (64, 64))
                 self.assertEqual(image.mode, "L")
+            for color_source in ("input", "reconstructed"):
+                color_arguments = list(arguments)
+                color_arguments[color_arguments.index("--output") + 1] = str(base / color_source)
+                color_arguments += ["--color-source", color_source]
+                with patch("sys.argv", color_arguments), contextlib.redirect_stdout(io.StringIO()):
+                    infer_awmm.main()
+                with Image.open(base / color_source / "0.png") as image:
+                    self.assertEqual(image.size, (64, 64))
+                    self.assertEqual(image.mode, "RGB")
 
 
 if __name__ == "__main__":
