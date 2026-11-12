@@ -1,0 +1,97 @@
+{
+  "status": "passed_cpu_synthetic_checks",
+  "unit_and_integration_tests": 43,
+  "test_summary": "43 CPU tests passed. Includes original-Y loader and color restoration bit-exact audits against extracted uploaded-original source; full Y training/resume/inference; guarded and explicit RGB-to-Y fine-tuning.",
+  "python": "3.12.14",
+  "pytorch": "2.5.1+cpu",
+  "python38_ast_compatibility": "passed for 8 new runtime modules",
+  "original_source_files_modified": [],
+  "source_archive_sha256": "f26e0e3f27d5fed8ffe93f6fa0c1fae5a70fca57834c67963e0200c950ddce52",
+  "real_awmm_images_available": false,
+  "real_teacher_weights_available": false,
+  "original_fusion_checkpoint_available": false,
+  "a40_cuda_tested": false,
+  "split_protocol": "Server-generated seed3407 90/10 clean-reference content groups; exact-test overlap excluded; not official scene-disjoint protocol",
+  "synthetic_smoke": {
+    "mode": "synthetic_smoke_only",
+    "device": "cpu",
+    "fused_shape": [
+      1,
+      1,
+      64,
+      64
+    ],
+    "losses": {
+      "intensity": 0.23746182024478912,
+      "ssim": 0.9889567494392395,
+      "gradient": 2.015084743499756,
+      "distill_ir": 0.7048130035400391,
+      "distill_vis": 0.05084293335676193,
+      "consistency": 0.012115348130464554,
+      "orthogonality": 0.008305568248033524,
+      "content_reconstruction": 0.24990539252758026,
+      "residual_reconstruction": 0.049944110214710236,
+      "self_supervision": 0.2998495101928711,
+      "total": 67.84397888183594
+    },
+    "gradient_norms": {
+      "fdn_ir": 1.0473359820669998,
+      "fdn_vis": 0.9501683855514899,
+      "dwam_ir": 0.09946665552762046,
+      "dwam_vis": 0.01867999452929937,
+      "clean_reconstructor_ir": 0.005926764570908261,
+      "residual_reconstructor_ir": 0.2628066868694082,
+      "clean_reconstructor_vis": 0.005424456934489711,
+      "residual_reconstructor_vis": 0.16114335641988137
+    },
+    "checkpoint_saved": false
+  },
+  "color_postprocess": {
+    "input_chroma": true,
+    "reconstructed_chroma": true,
+    "default": "none",
+    "retraining_required": false,
+    "real_color_quality_tested": false,
+    "training_anchor_respected": true
+  },
+  "original_y_audit": {
+    "loader_png_jpeg": "bit-exact against uploaded imread_uint(n_channels=3)",
+    "color_restore": "bit-exact against uploaded test.py block including uint8 conversion and resize",
+    "legacy_checkpoint_mode_guards": true,
+    "real_original_y_quality_tested": false
+  },
+  "original_y_synthetic_smoke": {
+    "mode": "synthetic_smoke_only",
+    "device": "cpu",
+    "fused_shape": [
+      1,
+      1,
+      64,
+      64
+    ],
+    "losses": {
+      "intensity": 0.23764313757419586,
+      "ssim": 0.9891608357429504,
+      "gradient": 2.0137083530426025,
+      "distill_ir": 0.6983481049537659,
+      "distill_vis": 0.050972361117601395,
+      "consistency": 0.011465978808701038,
+      "orthogonality": 0.007775300182402134,
+      "content_reconstruction": 0.2523941993713379,
+      "residual_reconstruction": 0.05017147213220596,
+      "self_supervision": 0.30256566405296326,
+      "total": 67.82247924804688
+    },
+    "gradient_norms": {
+      "fdn_ir": 1.1101194800043435,
+      "fdn_vis": 0.8562321020369591,
+      "dwam_ir": 0.10515294093728116,
+      "dwam_vis": 0.019177551452131594,
+      "clean_reconstructor_ir": 0.006286013425001813,
+      "residual_reconstructor_ir": 0.2696945633837731,
+      "clean_reconstructor_vis": 0.004485241403406031,
+      "residual_reconstructor_vis": 0.15763500784931672
+    },
+    "checkpoint_saved": false
+  }
+}
