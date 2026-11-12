@@ -101,6 +101,7 @@ def resume_semantics(config):
     from awmm.preprocessing import input_mode
     train = config["train"]
     return {
+        "model_variant": config.get("model_variant", "awmm"),
         "network": config["network"], "loss": config["loss"], "teachers": config["teachers"],
         "crop_size": config["dataset"].get("crop_size", 256),
         "input_mode": input_mode(config),
@@ -157,7 +158,8 @@ def calculate_losses(model, criterion, teachers, batch, amp_enabled):
         targets = teachers(batch["clean_ir"], batch["clean_vis"])
     with torch.cuda.amp.autocast(enabled=amp_enabled):
         outputs = model(batch["ir"], batch["vis"], return_aux=True)
-        clean_aux = model.encode_aux(batch["clean_ir"], batch["clean_vis"])
+        clean_aux = (None if getattr(model, "is_original_baseline", False)
+                     else model.encode_aux(batch["clean_ir"], batch["clean_vis"]))
     # The loss module explicitly promotes to float32, including BCE under AMP.
     return criterion(outputs, clean_aux, batch, targets)
 
@@ -165,9 +167,12 @@ def calculate_losses(model, criterion, teachers, batch, amp_enabled):
 def finite_gradient_summary(model):
     import torch
     summary = {}
-    for prefix in ("fdn_ir", "fdn_vis", "dwam_ir", "dwam_vis",
+    prefixes = (("conv_first", "patch_unembed.prompt_head", "patch_unembed_vis.prompt_head", "reconstruct_head")
+                if getattr(model, "is_original_baseline", False) else
+                ("fdn_ir", "fdn_vis", "dwam_ir", "dwam_vis",
                    "clean_reconstructor_ir", "residual_reconstructor_ir",
-                   "clean_reconstructor_vis", "residual_reconstructor_vis"):
+                   "clean_reconstructor_vis", "residual_reconstructor_vis"))
+    for prefix in prefixes:
         values = [p.grad for name, p in model.named_parameters()
                   if name.startswith(prefix) and p.grad is not None]
         if not values:
@@ -215,13 +220,13 @@ def synthetic_smoke(config, device):
     """One genuine model/loss backward pass with explicitly synthetic targets."""
     import torch
     from awmm.losses import AWMMLoss
-    from awmm.runtime import make_model, seed_everything
+    from awmm.runtime import make_model, seed_everything, make_criterion
     seed_everything(config["train"].get("seed", 3407))
     if device.type == "cpu":
         torch.set_num_threads(min(4, os.cpu_count() or 1))
-    model = make_model(config["network"]).to(device).train()
+    model = make_model(config["network"], config.get("model_variant", "awmm")).to(device).train()
     loss_options = config["loss"]
-    criterion = AWMMLoss(device=device, **loss_options)
+    criterion = make_criterion(config, device)
     clean_ir = torch.rand(1, 3, 64, 64, device=device)
     clean_vis = torch.rand(1, 3, 64, 64, device=device)
     from awmm.preprocessing import input_mode
@@ -235,12 +240,13 @@ def synthetic_smoke(config, device):
     targets = {"ir": clean_ir.mean(1, keepdim=True),
                "vis": clean_vis.new_full((1, 1), 0.8)}
     outputs = model(batch["ir"], batch["vis"], return_aux=True)
-    auxiliary = model.encode_aux(clean_ir, clean_vis)
+    auxiliary = None if getattr(model, "is_original_baseline", False) else model.encode_aux(clean_ir, clean_vis)
     losses = criterion(outputs, auxiliary, batch, targets)
     if any(not torch.isfinite(value).all() for value in losses.values()):
         raise FloatingPointError("Synthetic loss is not finite")
     losses["total"].backward()
     report = {"mode": "synthetic_smoke_only", "device": str(device),
+              "model_variant": config.get("model_variant", "awmm"),
               "fused_shape": list(outputs["fused"].shape),
               "losses": {key: float(value.detach()) for key, value in losses.items()},
               "gradient_norms": finite_gradient_summary(model),
@@ -277,11 +283,13 @@ def main(argv=None):
     from torch.utils.data import DataLoader
     from awmm.data import AWMMFourImageDataset
     from awmm.losses import AWMMLoss
-    from awmm.runtime import load_config, make_model, manifest_digest, seed_everything, build_teachers
+    from awmm.runtime import load_config, make_model, manifest_digest, seed_everything, build_teachers, make_criterion
     from awmm.preprocessing import input_mode
 
     config = copy.deepcopy(load_config(args.config))
     mode = input_mode(config)
+    if config.get("model_variant", "awmm") == "original_p2fusion" and mode != "original_y":
+        raise ValueError("The matched original baseline must use original_y preprocessing")
     if mode == "original_y" and config["loss"].get("fusion_reference", "first_channel") != "first_channel":
         raise ValueError("original_y uses the first of three identical Y channels as fusion reference")
     for argument, section, key in ((args.data_root, "dataset", "root"),
@@ -326,7 +334,7 @@ def main(argv=None):
     generator = torch.Generator()
     train_loader = DataLoader(train_dataset, shuffle=True, generator=generator, **loader_arguments)
     val_loader = DataLoader(val_dataset, shuffle=False, **loader_arguments)
-    model = make_model(config["network"]).to(device)
+    model = make_model(config["network"], config.get("model_variant", "awmm")).to(device)
     initial = args.init or (None if args.from_scratch or args.resume else config.get("init_checkpoint"))
     if not args.resume and not initial and not args.from_scratch:
         raise ValueError("Provide --init /path/to/source.pth or explicitly use --from-scratch")
@@ -350,7 +358,7 @@ def main(argv=None):
         gamma=float(train_options.get("gamma", 0.5)))
     amp_enabled = bool(train_options.get("amp", True) and device.type == "cuda")
     scaler = torch.cuda.amp.GradScaler(enabled=amp_enabled)
-    criterion = AWMMLoss(device=device, **config["loss"])
+    criterion = make_criterion(config, device)
     step, epoch_start, batch_start, best_val = 0, 0, 0, float("inf")
     if args.resume:
         state = load_training_state(args.resume, model, optimizer, scheduler, scaler, digest,
@@ -370,6 +378,7 @@ def main(argv=None):
     (run_dir / "config_resolved.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     log_path = run_dir / "metrics.jsonl"
     append_log(log_path, {"event": "start", "device": str(device), "torch": torch.__version__,
+                          "model_variant": config.get("model_variant", "awmm"),
                           "input_mode": mode,
                           "cuda_runtime": torch.version.cuda, "amp": amp_enabled,
                           "train_samples": len(train_dataset), "val_samples": len(val_dataset),

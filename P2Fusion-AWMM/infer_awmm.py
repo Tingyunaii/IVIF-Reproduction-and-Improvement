@@ -78,7 +78,7 @@ def main():
     if mode == "original_y" and args.color_source not in ("none", "original"):
         raise ValueError("original_y supports only original observed Cr/Cb or grayscale Y output")
     device = torch.device(args.device)
-    model = make_model(config["network"]).to(device)
+    model = make_model(config["network"], config.get("model_variant", "awmm")).to(device)
     load_awmm_checkpoint(model, args.checkpoint)
     model.eval()
     ir_paths, vis_paths = image_index(args.ir_dir), image_index(args.vis_dir)

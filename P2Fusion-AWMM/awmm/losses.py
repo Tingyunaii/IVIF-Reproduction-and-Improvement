@@ -137,7 +137,8 @@ class AWMMLoss(nn.Module):
         with torch.autocast(device_type=device_type, enabled=False):
             return self._forward_float32(degraded_outputs, clean_aux, batch, teacher_targets)
 
-    def _forward_float32(self, degraded_outputs, clean_aux, batch, teacher_targets):
+    def fusion_components(self, degraded_outputs, batch, teacher_targets):
+        """The shared five fusion/distillation terms, without adaptation losses."""
         fused = degraded_outputs["fused"].float()
         clean_ir = batch["clean_ir"].float()
         clean_vis = batch["clean_vis"].float()
@@ -179,6 +180,10 @@ class AWMMLoss(nn.Module):
             "distill_ir": original["distill_ir"],
             "distill_vis": original["distill_vis"],
         }
+        return result
+
+    def _forward_float32(self, degraded_outputs, clean_aux, batch, teacher_targets):
+        result = self.fusion_components(degraded_outputs, batch, teacher_targets)
 
         consistency, orthogonal, content, residual = [], [], [], []
         for modality in ("ir", "vis"):

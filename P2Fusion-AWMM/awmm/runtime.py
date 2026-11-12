@@ -26,9 +26,22 @@ def seed_everything(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-def make_model(network_config):
+def make_model(network_config, variant="awmm"):
+    if variant == "original_p2fusion":
+        from models.original_awmm_baseline import OriginalP2FusionAWMM
+        return OriginalP2FusionAWMM(**network_config)
+    if variant != "awmm":
+        raise ValueError("Unknown model_variant: " + str(variant))
     from models.awmm_network import AWMMP2Fusion
     return AWMMP2Fusion(**network_config)
+
+
+def make_criterion(config, device):
+    if config.get("model_variant", "awmm") == "original_p2fusion":
+        from models.original_awmm_baseline import OriginalFiveLoss
+        return OriginalFiveLoss(device=device, **config["loss"])
+    from awmm.losses import AWMMLoss
+    return AWMMLoss(device=device, **config["loss"])
 
 
 def manifest_digest(paths):
