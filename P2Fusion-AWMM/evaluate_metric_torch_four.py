@@ -52,24 +52,43 @@ def load_functions(metric_path, ssim_path):
     return {name: namespace[name + '_function'] for name in METRICS}, digest
 
 
+def ssim_arguments(images, layout):
+    if layout == 'nchw':
+        return [image[None, None] for image in images]
+    if layout == 'hw':
+        return images
+    if layout not in ('numpy_hw', 'pil'):
+        raise ValueError('Unknown SSIM input format: ' + str(layout))
+    converted = []
+    for image in images:
+        array = image.detach().cpu().numpy()
+        if (not np.isfinite(array).all() or array.min() < 0 or array.max() > 255
+                or not np.equal(array, np.rint(array)).all()):
+            raise ValueError('Image-based SSIM requires the original integral 8-bit grayscale values')
+        # uint8 matters: torchvision ToTensor divides byte images by255, but not float arrays.
+        array = array.astype(np.uint8)
+        converted.append(Image.fromarray(array) if layout == 'pil' else array)
+    return converted
+
+
 def detect_ssim_layout(function, device, requested):
-    # Shape negotiation only. The SSIM formula, arguments and 0..255 range are unchanged.
+    # Negotiate representation only; normalization inside the user's backend remains its responsibility.
     a = torch.arange(64 * 64, device=device, dtype=torch.float32).reshape(64, 64) % 256
     b = torch.flip(a, [0])
     f = (a + b) / 2
-    layouts = ('nchw', 'hw') if requested == 'auto' else (requested,)
+    layouts = ('nchw', 'hw', 'numpy_hw', 'pil') if requested == 'auto' else (requested,)
     failures = {}
     with torch.no_grad():
         for layout in layouts:
-            images = [x[None, None] if layout == 'nchw' else x for x in (a, b, f)]
             try:
+                images = ssim_arguments([a, b, f], layout)
                 value = float(function(*images))
                 if not np.isfinite(value):
                     raise ValueError('SSIM returned a nonfinite value on the format probe')
                 return layout, failures
             except (ValueError, RuntimeError, TypeError, IndexError, AttributeError) as exc:
                 failures[layout] = '{}: {}'.format(type(exc).__name__, exc)
-    raise RuntimeError('Cannot call the server SSIM implementation with 0..255 tensors: ' + str(failures))
+    raise RuntimeError('Cannot call server SSIM with tensors, uint8 arrays or PIL grayscale images: ' + str(failures))
 
 
 def image_files(folder):
@@ -107,7 +126,7 @@ def score_images(images, functions, ssim_layout):
         raise ValueError('Images must be aligned 2D grayscale, with identical dimensions; no resizing')
     scores = {}
     for name in METRICS:
-        arguments = [image[None, None] for image in images] if name == 'SSIM' and ssim_layout == 'nchw' else images
+        arguments = ssim_arguments(images, ssim_layout) if name == 'SSIM' else images
         value = functions[name](*arguments)
         scores[name] = float(value.detach().cpu()) if torch.is_tensor(value) else float(value)
     return scores
@@ -144,7 +163,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--metric-file', default='/home/zj/IVIF_ZOO/Metric/Metric_torch.py')
     p.add_argument('--ssim-file', default=None, help='Defaults to ssim.py beside Metric_torch.py')
-    p.add_argument('--ssim-layout', choices=('auto', 'nchw', 'hw'), default='auto')
+    p.add_argument('--ssim-layout', choices=('auto', 'nchw', 'hw', 'numpy_hw', 'pil'), default='auto')
     p.add_argument('--awmm-root', default='/home/zj/miniconda3/envs/p2fusion/project/Dataset/AWMM-100k')
     p.add_argument('--test-root', default='/home/zj/miniconda3/envs/p2fusion/project/Dataset/valsets')
     p.add_argument('--awmm-images', default='evaluation/awmm_legacy_comparison/images/legacy_color')
@@ -164,6 +183,7 @@ def main():
     device = torch.device(args.device)
     functions, selected_digest = load_functions(metric_path, ssim_path)
     layout, probe_failures = detect_ssim_layout(functions['SSIM'], device, args.ssim_layout)
+    print('SSIM input format: ' + layout, flush=True)
     jobs = []
     for weather in WEATHERS:
         folder = Path(args.awmm_root) / 'AWMM-Text/Test' / weather
@@ -190,7 +210,8 @@ def main():
         function_loading='Original selected *_function definitions and corr2 compiled verbatim; unused imports skipped.',
         gray='Pillow RGB-to-L uint8, then float32 tensors in 0..255; no min-max normalization.',
         ssim_layout=layout, ssim_format_probe_failures=probe_failures,
-        ssim_range='Same 0..255 values as the supplied wrapper; no override of the server ssim() defaults.',
+        ssim_range='Original grayscale values: float32 0..255 for tensor backends; uint8 0..255 for NumPy/PIL backends. '
+                   'Any ToTensor or normalization INSIDE the server ssim() is retained, with no parameter overrides.',
         PSNR='Original wrapper normalizes by255 and uses average MSE against the two references.',
         pairing='Exact filename stems; all expected samples, no intersection or resizing.',
         expected_counts=dict(AWMM_per_weather=AWMM_COUNT, **COUNTS),

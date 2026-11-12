@@ -23,9 +23,11 @@ python -u evaluate_metric_torch_four.py \
 
 从指定 `Metric_torch.py` 的 AST 原样编译 `CC_function`、`PSNR_function`、`SCD_function`、`SSIM_function` 以及 SCD 所需的 `corr2`。不复制或改写公式，也不执行未选指标的导入，因此不需要 Qabf、Nabf、scikit-learn 等未使用依赖。
 
-SSIM 仍导入服务器真正的 `ssim.py::ssim`。先用固定格式样本检查其接受 `[1,1,H,W]` 还是 `[H,W]`，记录选定形状及探测失败信息；可用 `--ssim-layout nchw|hw` 固定。两种形状都不接受时明确报错，不替换另一种 SSIM 算法。服务器 SSIM 源文件未上传，因此本地只验证了适配器与测试后端，最终 SSIM 实现以服务器文件和记录的哈希为准。
+SSIM 仍导入服务器真正的 `ssim.py::ssim`。先用固定格式样本依次检查4种输入：float32张量 `[1,1,H,W]`、float32张量 `[H,W]`、uint8 NumPy灰度数组、PIL L图像，记录选定格式及探测失败信息；可用 `--ssim-layout nchw|hw|numpy_hw|pil` 固定。全部不接受时明确报错，不替换另一种 SSIM 算法。服务器 SSIM 源文件未上传，因此本地只验证了适配器与测试后端，最终 SSIM 实现以服务器文件和记录的哈希为准。
 
-三路图像均为 Pillow `convert('L')` 后转 float32 的0..255数值，不做逐图最大最小值归一化。CC、SCD 接收2维张量；PSNR 按原函数内部除255并计算两路均方误差的平均；SSIM 包装函数分别计算两路 SSIM 后取平均，保留服务器 `ssim()` 自身默认参数，不额外修改其范围参数。实际使用的形状、数值范围、源码及脚本 SHA256 全部写入报告。
+服务器出现 `pic should be PIL Image or ndarray. Got <class 'torch.Tensor'>` 时，说明其 SSIM 内部会做图像到张量的转换。修正版自动使用 NumPy uint8 或 PIL 输入；不要传 float32 NumPy 数组冒充原始8位图，因为 torchvision ToTensor 对 uint8 会除255、对浮点数组不会。脚本保留后端内部的转换，不再提前额外除255。原图像像素值逐位置保留。
+
+三路图像均先经 Pillow `convert('L')`，不做逐图最大最小值归一化。CC、SCD 接收0..255的2维float32张量；PSNR 按原函数内部除255并计算两路均方误差的平均。SSIM 按后端接受的格式传入等值的float32张量、uint8数组或PIL图像；包装函数分别计算两路 SSIM 后取平均，保留服务器 `ssim()` 自身默认参数及内部归一化，不额外修改其范围参数。实际使用的格式、源码及脚本 SHA256 全部写入报告。
 
 ## 参考集合与输出
 

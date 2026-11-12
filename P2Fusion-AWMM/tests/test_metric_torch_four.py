@@ -25,6 +25,44 @@ class MetricFourTests(unittest.TestCase):
         path.write_text('from pytorch_msssim import ssim\n')
         return path
 
+    def image_backend(self, root):
+        path = root / 'ssim.py'
+        path.write_text('from torchvision.transforms.functional import to_tensor\n'
+                        'from pytorch_msssim import ssim as core_ssim\n'
+                        'def ssim(a, b):\n'
+                        '    a = to_tensor(a).unsqueeze(0)\n'
+                        '    b = to_tensor(b).unsqueeze(0)\n'
+                        '    return core_ssim(a, b, data_range=1.0)\n')
+        return path
+
+    def test_torchvision_image_backend_preserves_uint8_normalization(self):
+        torch.set_num_threads(1)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            functions, _ = runner.load_functions(UPLOAD, self.image_backend(root))
+            # Reproduce the user's exact failure with the previous tensor-only adapter.
+            with self.assertRaisesRegex(RuntimeError, 'pic should be PIL Image or ndarray'):
+                runner.detect_ssim_layout(functions['SSIM'], torch.device('cpu'), 'nchw')
+            layout, failures = runner.detect_ssim_layout(functions['SSIM'], torch.device('cpu'), 'auto')
+            self.assertEqual(layout, 'numpy_hw')
+            self.assertEqual(set(failures), {'nchw', 'hw'})
+            generator = torch.Generator().manual_seed(9)
+            images = [torch.randint(0, 256, (96, 96), generator=generator).float() for _ in range(3)]
+            numpy_images = runner.ssim_arguments(images, 'numpy_hw')
+            for tensor, array in zip(images, numpy_images):
+                self.assertEqual(array.dtype, np.uint8)
+                np.testing.assert_array_equal(array, tensor.numpy())
+            # Compare against normal PIL input to the SAME original wrapper/backend.
+            expected = functions['SSIM'](*[Image.fromarray(image.numpy().astype(np.uint8)) for image in images])
+            actual = runner.score_images(images, functions, layout)
+            self.assertEqual(actual['SSIM'], expected)
+            self.assertEqual(runner.score_images(images, functions, 'pil')['SSIM'], expected)
+            # Float-array input bypasses ToTensor's /255: it must not be the production path.
+            wrong_scale = functions['SSIM'](*[image.numpy() for image in images])
+            self.assertGreater(abs(expected - wrong_scale), 1e-6)
+            for name in ('CC', 'PSNR', 'SCD'):
+                self.assertEqual(actual[name], float(functions[name](*images)))
+
     def test_original_definitions_and_rank_adapter(self):
         torch.set_num_threads(1)
         with tempfile.TemporaryDirectory() as tmp:
@@ -46,7 +84,7 @@ class MetricFourTests(unittest.TestCase):
     def test_five_datasets_both_awmm_references_and_read_only_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            ssim = self.backend(root)
+            ssim = self.image_backend(root)
             rng = np.random.RandomState(16)
             input_paths = []
             for weather in runner.WEATHERS:
@@ -89,7 +127,7 @@ class MetricFourTests(unittest.TestCase):
                 self.assertTrue(all(np.isfinite(float(row[name])) for name in runner.METRICS))
                 self.assertTrue(all(row[name + '_finite'] == row['count'] for name in runner.METRICS))
             run = json.loads((root / 'out/run.json').read_text())
-            self.assertEqual(run['ssim_layout'], 'nchw')
+            self.assertEqual(run['ssim_layout'], 'numpy_hw')
             self.assertFalse(run['inference'])
             self.assertEqual(run['metric_file']['sha256'], runner.sha256(UPLOAD))
             self.assertEqual(before, {str(path): runner.sha256(path) for path in input_paths})
