@@ -8,7 +8,7 @@ from PIL import Image
 import torch
 
 from awmm.runtime import load_config, make_model, load_awmm_checkpoint
-from awmm.preprocessing import input_mode, read_model_image, original_color_restore
+from awmm.preprocessing import input_mode, read_model_image, original_color_restore, fused_y_uint8
 
 
 def image_index(folder):
@@ -55,6 +55,8 @@ def main():
     parser.add_argument("--ir-dir", required=True)
     parser.add_argument("--vis-dir", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--save-y-dir", default=None,
+                        help="Also save decoder Y as 8-bit grayscale PNG; original_y checkpoints only")
     parser.add_argument("--color-source", choices=("none", "input", "reconstructed", "original"), default=None,
                         help="original_y defaults to original OpenCV Y+observed Cr/Cb; RGB mode keeps legacy options")
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
@@ -64,6 +66,8 @@ def main():
     if not config:
         raise ValueError("Checkpoint has no architecture config; supply --config")
     mode = input_mode(config)
+    if args.save_y_dir and mode != "original_y":
+        raise ValueError("Decoder output can be called Y only for an original_y-trained checkpoint")
     if checkpoint.get("config") and input_mode(checkpoint["config"]) != mode:
         raise ValueError("Input mode override differs from checkpoint training metadata")
     if args.color_source is None:
@@ -81,6 +85,11 @@ def main():
     if not ir_paths or set(ir_paths) != set(vis_paths):
         raise ValueError("IR/VIS folders must contain identical, nonempty filename-stem sets")
     output = Path(args.output)
+    y_output = Path(args.save_y_dir) if args.save_y_dir else None
+    if y_output is not None:
+        if y_output.resolve() == output.resolve():
+            raise ValueError("--save-y-dir must differ from --output")
+        y_output.mkdir(parents=True, exist_ok=False)
     output.mkdir(parents=True, exist_ok=True)
     with torch.no_grad():
         for stem in sorted(ir_paths):
@@ -90,6 +99,8 @@ def main():
             ir, vis = ir.to(device), vis.to(device)
             outputs = model(ir, vis, return_aux=args.color_source == "reconstructed")
             result = outputs["fused"]
+            if y_output is not None:
+                Image.fromarray(fused_y_uint8(result)).save(y_output / (stem + ".png"))
             if args.color_source == "original":
                 Image.fromarray(original_color_restore(result, vis_paths[stem])).save(output / (stem + ".png"))
                 continue
@@ -106,6 +117,7 @@ def main():
     print(json.dumps({"images": len(ir_paths), "output": str(output),
                       "format": "grayscale fusion" if args.color_source == "none" else "RGB color postprocess",
                       "input_mode": mode,
+                      "y_output": str(y_output) if y_output is not None else None,
                       "color_source": args.color_source}))
 
 

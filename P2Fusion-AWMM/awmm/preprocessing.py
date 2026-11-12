@@ -28,12 +28,17 @@ def read_model_image(path, mode="rgb"):
     return np.repeat(y, 3, axis=2)
 
 
+def fused_y_uint8(fused_y):
+    """The original quantized decoder Y, before any chroma merge or RGB clipping."""
+    if fused_y.ndim != 4 or fused_y.shape[:2] != (1, 1):
+        raise ValueError("Expected one fused Y image [1,1,H,W]")
+    return (fused_y[0, 0].detach().float().cpu().clamp(0, 1).numpy() * 255).round().astype(np.uint8)
+
+
 def original_color_restore(fused_y, visible_path):
     """Match original test.py: uint8 fused Y + observed VIS Cr/Cb -> RGB."""
     import cv2
-    if fused_y.ndim != 4 or fused_y.shape[:2] != (1, 1):
-        raise ValueError("Expected one fused Y image [1,1,H,W]")
-    y = (fused_y[0, 0].detach().float().cpu().clamp(0, 1).numpy() * 255).round().astype(np.uint8)
+    y = fused_y_uint8(fused_y)
     visible = cv2.imread(str(visible_path), cv2.IMREAD_COLOR)
     if visible is None:
         raise ValueError("Cannot read visible image: " + str(visible_path))

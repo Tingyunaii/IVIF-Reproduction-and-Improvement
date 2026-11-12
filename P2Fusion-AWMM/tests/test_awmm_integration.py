@@ -106,14 +106,27 @@ class EndToEndTests(unittest.TestCase):
                          "--ir-dir", str(root / "AWMM-Text/Test/Haze/ir"),
                          "--vis-dir", str(root / "AWMM-Text/Test/Haze/vi"),
                          "--output", str(base / "output"), "--device", "cpu"]
+            if self.input_mode == "original_y":
+                arguments += ["--save-y-dir", str(base / "direct_y")]
             with patch("sys.argv", arguments), contextlib.redirect_stdout(io.StringIO()):
                 infer_awmm.main()
             with Image.open(base / "output/0.png") as image:
                 self.assertEqual(image.size, (64, 64))
                 self.assertEqual(image.mode, "RGB" if self.input_mode == "original_y" else "L")
+            if self.input_mode == "original_y":
+                from awmm.preprocessing import original_color_restore
+                with Image.open(base / "direct_y/0.png") as image:
+                    self.assertEqual(image.mode, "L")
+                    exported_y = torch.from_numpy(np.array(image, dtype=np.float32) / 255).view(1, 1, 64, 64)
+                expected = original_color_restore(exported_y, root / "AWMM-Text/Test/Haze/vi/0.png")
+                with Image.open(base / "output/0.png") as image:
+                    np.testing.assert_array_equal(np.asarray(image), expected)
             color_sources = ("original",) if self.input_mode == "original_y" else ("input", "reconstructed")
             for color_source in color_sources:
                 color_arguments = list(arguments)
+                if "--save-y-dir" in color_arguments:
+                    position = color_arguments.index("--save-y-dir")
+                    del color_arguments[position:position + 2]
                 color_arguments[color_arguments.index("--output") + 1] = str(base / color_source)
                 color_arguments += ["--color-source", color_source]
                 with patch("sys.argv", color_arguments), contextlib.redirect_stdout(io.StringIO()):
