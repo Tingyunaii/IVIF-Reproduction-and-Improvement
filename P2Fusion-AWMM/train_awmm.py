@@ -105,6 +105,8 @@ def resume_semantics(config):
         "network": config["network"], "loss": config["loss"], "teachers": config["teachers"],
         "crop_size": config["dataset"].get("crop_size", 256),
         "input_mode": input_mode(config),
+        "data_task": config["dataset"].get("task", "awmm"),
+        "light_pairing": config["dataset"].get("light_pairing"),
         "train": {key: train.get(key) for key in (
             "batch_size", "lr", "base_lr_multiplier", "freeze_encoder_steps",
             "milestones", "gamma", "amp", "seed", "weight_decay", "grad_clip",
@@ -315,12 +317,26 @@ def main(argv=None):
         raise ValueError("Training crop_size must be a positive multiple of 32")
     manifest_dir = Path(config["dataset"]["manifest_dir"])
     train_manifest, val_manifest = manifest_dir / "train.json", manifest_dir / "val.json"
-    audit_split_manifests(train_manifest, val_manifest)
-    digest = manifest_digest([train_manifest, val_manifest])
-    train_dataset = AWMMFourImageDataset(config["dataset"]["root"], train_manifest,
-                                        crop_size=crop_size, training=True, input_mode=mode)
-    val_dataset = AWMMFourImageDataset(config["dataset"]["root"], val_manifest,
-                                      crop_size=crop_size, training=False, input_mode=mode)
+    data_task = config["dataset"].get("task", "awmm")
+    if data_task == "msrs_light":
+        from awmm.msrs_light import MSRSLightDataset, audit_manifests
+        if mode != "original_y" or config.get("model_variant", "awmm") != "awmm":
+            raise ValueError("MSRS illumination experiment uses the full adapted original_y network")
+        audit_manifests(manifest_dir)
+        digest = manifest_digest([train_manifest, val_manifest, manifest_dir / "test.json"])
+        data_options = dict(root=config["dataset"]["root"], crop_size=crop_size, input_mode=mode,
+                            light_pairing=config["dataset"].get("light_pairing"))
+        train_dataset = MSRSLightDataset(manifest=train_manifest, training=True, **data_options)
+        val_dataset = MSRSLightDataset(manifest=val_manifest, training=False, **data_options)
+    elif data_task == "awmm":
+        audit_split_manifests(train_manifest, val_manifest)
+        digest = manifest_digest([train_manifest, val_manifest])
+        train_dataset = AWMMFourImageDataset(config["dataset"]["root"], train_manifest,
+                                            crop_size=crop_size, training=True, input_mode=mode)
+        val_dataset = AWMMFourImageDataset(config["dataset"]["root"], val_manifest,
+                                          crop_size=crop_size, training=False, input_mode=mode)
+    else:
+        raise ValueError("Unknown dataset.task: " + str(data_task))
     batch_size = int(train_options.get("batch_size", 2))
     workers = int(train_options.get("num_workers", 4))
     if batch_size < 1 or workers < 0:
@@ -380,6 +396,7 @@ def main(argv=None):
     append_log(log_path, {"event": "start", "device": str(device), "torch": torch.__version__,
                           "model_variant": config.get("model_variant", "awmm"),
                           "input_mode": mode,
+                          "data_task": data_task,
                           "cuda_runtime": torch.version.cuda, "amp": amp_enabled,
                           "train_samples": len(train_dataset), "val_samples": len(val_dataset),
                           "validation": "deterministic_center_crop", "val_batch_limit": args.val_batches,
