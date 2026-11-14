@@ -77,3 +77,21 @@ CUDA_VISIBLE_DEVICES=0 python -u train_awmm.py \
 `infer_awmm.py` 现在按checkpoint的model_variant自动构建正确网络，原版Y/CrCb颜色还原继续生效。`infer_original_p2fusion.py` 也能严格加载本基线的model参数，因为其网络参数名与原版完全一致。
 
 基线best.pt按五项验证总损失选择，而已有改进best.pt按八项选择，checkpoint选择标准存在这一差别；不能直接比较两者训练total的大小。最终用相同保留测试集和相同指标评估。若要进一步隔离模块本身贡献，还需FDN、DWAM和辅助损失的分步消融。
+
+## 训练完成：AWMM三模型对比
+
+新增 `compare_awmm_original_baseline.py`，只需下载这个文件到基线项目根目录。它对新基线的best.pt进行150组测试推理，按原版流程还原彩色；复用原Y项目已完成的作者与当前Y模型彩色结果，并重新计算其分数核对一致性。
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python -u compare_awmm_original_baseline.py \
+  --checkpoint runs/p2fusion_original_awmm_y_bs32_300/best.pt \
+  --comparison-dir /home/zj/miniconda3/envs/p2fusion/project/P2Fusion-AWMM-originalY/evaluation/awmm_y_diagnostic \
+  --out-dir evaluation/original_awmm_vs_current_y \
+  --vif-mode mean --device cuda
+```
+
+默认数据根目录保持AWMM-100k，三天气各50组。两套参考（干净/恶劣）分开，使用此前相同FQI_E、VIF mean、Qabf、MI参考评估器；保留MI分量。干净图仅供评估，不传入推理。输出目录必须不存在。
+
+`summary.csv` 汇总三天气及ALL；`per_image.csv` 为逐图指标；`paired_deltas.csv` 与 `delta_summary.csv` 分别记录“当前Y改进模型减AWMM训练的原网络”和“AWMM训练的原网络减作者权重”。其中 `author` 是作者原权重，`original_awmm` 是本次新基线，`current_y` 是现有FDN/DWAM模型。
+
+新彩色图保存在 `images/original_awmm/{Haze,Rain,Snow}/`，复用图仍在原Y项目。`run.json` 记录权重、参考实验、脚本哈希和差值方向。返回 `summary.csv`、`delta_summary.csv`、`paired_deltas.csv`、`run.json` 即可继续分析。
